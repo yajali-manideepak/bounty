@@ -165,6 +165,68 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
+// POST /api/auth/reset-password — Reset forgotten password
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { email, newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Email and new password are required.' }
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await db.get('SELECT * FROM users WHERE email = ?', [cleanEmail]);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'No registered account found with this email address.' }
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        error: { message: 'Your account has been deactivated. Please contact an administrator.' }
+      });
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 16) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'New password must be between 8 and 16 characters in length.' }
+      });
+    }
+
+    const hasLetters = /[a-zA-Z]/.test(newPassword);
+    const hasNumbers = /[0-9]/.test(newPassword);
+    if (!hasLetters || !hasNumbers) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'New password must be a combination of both letters and numbers.' }
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+    await db.run(
+      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [passwordHash, user.id]
+    );
+
+    await createAuditLog(user.id, 'PASSWORD_RESET', 'USER', user.id, 'User reset their password via Forgot Password');
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully. You can now sign in with your new password.'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/auth/logout
 router.post('/logout', authenticateToken, async (req, res, next) => {
   try {
